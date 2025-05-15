@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foundation Calculator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Foundation Calculator</h2>
+        <form id="foundationForm">
+            <label for="height">Height (ft):</label>
+            <input type="number" id="height" min="1" step="0.1" required>
+
+            <label for="width">Width (ft):</label>
+            <input type="number" id="width" min="1" step="0.1" required>
+
+            <label for="length">Length (ft):</label>
+            <input type="number" id="length" min="1" step="0.1" required>
+
+            <label for="soilType">Ground Quality (Soil Type):</label>
+            <select id="soilType" required>
+                <option value="sand">Sand (2,000 psf)</option>
+                <option value="loam">Loam (2,500 psf)</option>
+                <option value="clay">Clay (3,000 psf)</option>
+            </select>
+
+            <label for="windSpeed">Maximum Wind Speed (mph):</label>
+            <input type="number" id="windSpeed" min="1" step="1" required>
+
+            <label for="maxLoad">Load (lbs):</label>
+            <input type="number" id="maxLoad" min="1" step="1" required>
+
+            <button type="submit">Calculate Foundations</button>
+        </form>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        document.getElementById('foundationForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            calculateFoundations();
+        });
+
+        function calculateFoundations() {
+            // Get input values
+            const height = parseFloat(document.getElementById('height').value);
+            const width = parseFloat(document.getElementById('width').value);
+            const length = parseFloat(document.getElementById('length').value);
+            const soilType = document.getElementById('soilType').value;
+            const windSpeed = parseFloat(document.getElementById('windSpeed').value);
+            const maxLoad = parseFloat(document.getElementById('maxLoad').value);
+
+            // Soil bearing capacity (psf)
+            const soilCapacities = {
+                sand: 2000,
+                loam: 2500,
+                clay: 3000
+            };
+            const soilCapacity = soilCapacities[soilType];
+
+            // Calculate wind load (psf) using q = 0.00256 * V^2
+            const windPressure = 0.00256 * windSpeed * windSpeed;
+
+            // Wind force on larger face (height x larger of width/length)
+            const maxDimension = Math.max(width, length);
+            const windArea = height * maxDimension;
+            const windForce = windPressure * windArea;
+
+            // Overturned moment (force at centroid of height)
+            const overturnMoment = windForce * (height / 2);
+
+            // --- Pile Foundation ---
+            // Assume 4 piles, depth based on soil type and wind load
+            let pileDepth;
+            if (soilType === 'sand') {
+                pileDepth = Math.max(6, height / 2); // Min 6ft, or height/2 for sand
+            } else if (soilType === 'loam') {
+                pileDepth = Math.max(5, height / 2.5);
+            } else {
+                pileDepth = Math.max(4, height / 3);
+            }
+            // Adjust depth for wind speed
+            pileDepth = Math.min(pileDepth * (windSpeed / 100), 20); // Scale with wind, max 20ft
+
+            // Pile diameter (12 inches for small structures, 18 inches for high wind/load)
+            const pileDiameter = windSpeed > 120 || maxLoad > 50000 ? 1.5 : 1.0; // ft
+            const pileArea = Math.PI * (pileDiameter / 2) ** 2;
+            const pileVolume = pileArea * pileDepth;
+            const totalPileVolume = 4 * pileVolume;
+
+            // Cap: Covers footprint (width x length x 1ft thick)
+            const capVolume = width * length * 1;
+            const totalPileConcrete = totalPileVolume + capVolume;
+
+            // --- Shallow Spread Footing ---
+            // Footing size: Ensure bearing capacity and overturning resistance
+            const footingArea = maxLoad / soilCapacity * 1.5; // Factor of safety 1.5
+            let footingWidth = Math.sqrt(footingArea * (length / width));
+            let footingLength = footingArea / footingWidth;
+            // Ensure footing is at least 1.5x building dimensions
+            footingWidth = Math.max(footingWidth, width * 1.5);
+            footingLength = Math.max(footingLength, length * 1.5);
+
+            // Footing depth: 1.5ft min, increase for sand or high wind
+            let footingDepth = 1.5;
+            if (soilType === 'sand') footingDepth = Math.max(1.5, height / 10);
+            if (windSpeed > 120) footingDepth += 0.5;
+
+            const footingVolume = footingWidth * footingLength * footingDepth;
+
+            // Output results
+            const output = `
+                <h3>Foundation Options</h3>
+                <h4>Pile Foundation</h4>
+                <p>Number of Piles: 4</p>
+                <p>Pile Diameter: ${pileDiameter.toFixed(2)} ft</p>
+                <p>Pile Depth: ${pileDepth.toFixed(2)} ft</p>
+                <p>Cap Size: ${width.toFixed(2)} ft x ${length.toFixed(2)} ft x 1 ft</p>
+                <p><strong>Total Concrete Volume: ${totalPileConcrete.toFixed(2)} ft³</strong></p>
+                <h4>Shallow Spread Footing</h4>
+                <p>Footing Size: ${footingWidth.toFixed(2)} ft x ${footingLength.toFixed(2)} ft</p>
+                <p>Footing Depth: ${footingDepth.toFixed(2)} ft</p>
+                <p><strong>Total Concrete Volume: ${footingVolume.toFixed(2)} ft³</strong></p>
+                <p><em>Note: These are approximate calculations. Consult a structural engineer for site-specific design.</em></p>
+            `;
+            document.getElementById('output').innerHTML = output;
+        }
+    </script>
+</body>
+</html>
