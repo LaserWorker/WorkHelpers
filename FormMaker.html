@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Image CSV Form Creator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #image-area { position: relative; display: inline-block; border: 1px solid #aaa; margin-right: 20px; vertical-align: top; }
+    #form-area { display: inline-block; vertical-align: top; }
+    .draggable { position: absolute; background: #fff; border: 1px solid #888; padding: 2px; cursor: move; min-width: 60px; }
+    .form-row { margin-bottom: 10px; }
+    #csv-output { width: 100%; height: 100px; font-family: monospace; }
+    #controls { margin: 15px 0; }
+    #setup input, #setup select { margin-bottom: 6px; }
+    #setup label { display: block; margin-top: 10px; }
+    #csv-table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    #csv-table th, #csv-table td { border: 1px solid #aaa; padding: 4px 8px; }
+    #csv-table th { background: #f7f7f7; }
+  </style>
+</head>
+<body>
+  <h2>Image CSV Form Creator</h2>
+  <div id="setup">
+    <label>
+      Upload Image:
+      <input type="file" id="image-input" accept="image/*">
+    </label>
+    <label>
+      Number of rows:
+      <input type="number" id="row-count" min="1" value="3">
+    </label>
+    <label>
+      CSV column names (comma separated):
+      <input type="text" id="columns" value="Name,Age,Type">
+    </label>
+    <label>
+      Columns for text boxes (comma separated column names):
+      <input type="text" id="text-columns" value="Name,Age">
+    </label>
+    <label>
+      Identification column (single column name from CSV columns):
+      <input type="text" id="id-column" value="Type">
+    </label>
+    <label>
+      Identification column values (comma separated, matches number of rows):
+      <input type="text" id="id-values" value="Student,Teacher,Admin">
+    </label>
+    <button onclick="setupForm()">Setup Form</button>
+  </div>
+  <hr>
+  <div>
+    <div id="image-area"></div>
+    <div id="form-area"></div>
+  </div>
+  <div id="controls">
+    <label>
+      Select Row:
+      <select id="row-select"></select>
+    </label>
+    <button onclick="fillInputsFromCSV()">Request row values</button>
+    <button onclick="pushInputsToCSV()">Change row values</button>
+  </div>
+  <div>
+    <h3>CSV Output</h3>
+    <textarea id="csv-output" readonly></textarea>
+  </div>
+  <div>
+    <h3>CSV Table (editable)</h3>
+    <div id="csv-table-area"></div>
+  </div>
+
+<script>
+let csvColumns = [];
+let textColumns = [];
+let idColumn = '';
+let idValues = [];
+let csvData = [];
+let rowCount = 0;
+let imageLoaded = false;
+
+function setupForm() {
+  // Gather setup inputs
+  csvColumns = document.getElementById('columns').value.split(',').map(s => s.trim()).filter(Boolean);
+  textColumns = document.getElementById('text-columns').value.split(',').map(s => s.trim()).filter(Boolean);
+  idColumn = document.getElementById('id-column').value.trim();
+  idValues = document.getElementById('id-values').value.split(',').map(s => s.trim()).filter(Boolean);
+  rowCount = parseInt(document.getElementById('row-count').value, 10);
+
+  // Validation
+  if (!csvColumns.length || !textColumns.length || !idColumn || !idValues.length || isNaN(rowCount) || rowCount < 1) {
+    alert('Please fill all fields properly.');
+    return;
+  }
+  if (!csvColumns.includes(idColumn)) {
+    alert('Identification column must be one of the CSV column names.');
+    return;
+  }
+  if (idValues.length !== rowCount) {
+    alert('Identification column values must match row count.');
+    return;
+  }
+  // Initialize CSV Data
+  csvData = [];
+  for (let i = 0; i < rowCount; i++) {
+    let row = {};
+    csvColumns.forEach(col => {
+      if (col === idColumn) row[col] = idValues[i];
+      else row[col] = '';
+    });
+    csvData.push(row);
+  }
+  // Set up image and form
+  setupImageAndInputs();
+  setupRowSelector();
+  renderCSVOutput();
+  renderCSVTable();
+}
+
+function setupImageAndInputs() {
+  // Clear previous
+  const imageArea = document.getElementById('image-area');
+  imageArea.innerHTML = '';
+  // Load image if provided
+  let imgFile = document.getElementById('image-input').files[0];
+  if (!imgFile) {
+    imageLoaded = false;
+    return;
+  }
+  let img = document.createElement('img');
+  img.style.maxWidth = '450px';
+  img.style.maxHeight = '350px';
+  img.onload = function() {
+    imageLoaded = true;
+    addTextBoxes(imageArea, img);
+  };
+  img.onerror = function() {
+    alert('Image failed to load.');
+    imageLoaded = false;
+  };
+  img.src = URL.createObjectURL(imgFile);
+  imageArea.appendChild(img);
+}
+
+function addTextBoxes(imageArea, img) {
+  // Add text boxes to the right of image at first, let user drag them
+  let startLeft = img.width + 10;
+  let startTop = 10;
+  textColumns.forEach((col, idx) => {
+    let box = document.createElement('input');
+    box.type = 'text';
+    box.className = 'draggable';
+    box.setAttribute('data-column', col);
+    box.style.left = startLeft + 'px';
+    box.style.top = (startTop + idx * 35) + 'px';
+    box.placeholder = col;
+    makeDraggable(box, imageArea);
+    imageArea.appendChild(box);
+  });
+}
+
+function makeDraggable(elem, container) {
+  let offsetX, offsetY, dragging = false;
+  elem.addEventListener('mousedown', function(e) {
+    dragging = true;
+    offsetX = e.clientX - elem.getBoundingClientRect().left;
+    offsetY = e.clientY - elem.getBoundingClientRect().top;
+    elem.style.zIndex = 1000;
+    document.body.style.userSelect = 'none';
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    let rect = container.getBoundingClientRect();
+    let x = e.clientX - rect.left - offsetX;
+    let y = e.clientY - rect.top - offsetY;
+    // Boundaries
+    x = Math.max(0, Math.min(x, container.offsetWidth - elem.offsetWidth));
+    y = Math.max(0, Math.min(y, container.offsetHeight - elem.offsetHeight));
+    elem.style.left = x + 'px';
+    elem.style.top = y + 'px';
+  });
+  document.addEventListener('mouseup', function() {
+    if (dragging) {
+      dragging = false;
+      elem.style.zIndex = '';
+      document.body.style.userSelect = '';
+    }
+  });
+}
+
+function setupRowSelector() {
+  let sel = document.getElementById('row-select');
+  sel.innerHTML = '';
+  for (let i = 0; i < rowCount; i++) {
+    let opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = csvData[i][idColumn] || `Row ${i+1}`;
+    sel.appendChild(opt);
+  }
+}
+
+// Fill text boxes from CSV for selected row
+function fillInputsFromCSV() {
+  let idx = parseInt(document.getElementById('row-select').value, 10);
+  textColumns.forEach(col => {
+    let input = document.querySelector(`input[data-column="${col}"]`);
+    if (input) input.value = csvData[idx][col];
+  });
+}
+
+// Push text box values to CSV for selected row
+function pushInputsToCSV() {
+  let idx = parseInt(document.getElementById('row-select').value, 10);
+  textColumns.forEach(col => {
+    let input = document.querySelector(`input[data-column="${col}"]`);
+    if (input) csvData[idx][col] = input.value;
+  });
+  renderCSVOutput();
+  renderCSVTable();
+}
+
+// Render CSV output as text
+function renderCSVOutput() {
+  let out = [csvColumns.join(',')];
+  csvData.forEach(row => {
+    out.push(csvColumns.map(col => `"${(row[col] || '').replace(/"/g, '""')}"`).join(','));
+  });
+  document.getElementById('csv-output').value = out.join('\n');
+}
+
+// Editable CSV table below
+function renderCSVTable() {
+  let area = document.getElementById('csv-table-area');
+  area.innerHTML = '';
+  let table = document.createElement('table');
+  table.id = 'csv-table';
+  let thead = document.createElement('thead');
+  let tr = document.createElement('tr');
+  csvColumns.forEach(col => {
+    let th = document.createElement('th');
+    th.textContent = col;
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr);
+  table.appendChild(thead);
+  let tbody = document.createElement('tbody');
+  for (let i = 0; i < rowCount; i++) {
+    let tr = document.createElement('tr');
+    csvColumns.forEach(col => {
+      let td = document.createElement('td');
+      if (col === idColumn) {
+        let sel = document.createElement('select');
+        idValues.forEach(val => {
+          let opt = document.createElement('option');
+          opt.value = val;
+          opt.textContent = val;
+          if (csvData[i][col] === val) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        sel.onchange = function() {
+          csvData[i][col] = sel.value;
+          setupRowSelector();
+          renderCSVOutput();
+        };
+        td.appendChild(sel);
+      } else {
+        let inp = document.createElement('input');
+        inp.type = 'text';
+        inp.value = csvData[i][col] || '';
+        inp.oninput = function() {
+          csvData[i][col] = inp.value;
+          renderCSVOutput();
+        };
+        td.appendChild(inp);
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  area.appendChild(table);
+}
+</script>
+</body>
+</html>
