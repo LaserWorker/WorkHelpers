@@ -7,7 +7,7 @@
     body { font-family: Arial, sans-serif; margin: 20px; }
     #image-area { position: relative; display: inline-block; border: 1px solid #aaa; margin-right: 20px; vertical-align: top; }
     #form-area { display: inline-block; vertical-align: top; }
-    .draggable { position: absolute; background: #fff; border: 1px solid #888; padding: 2px; cursor: move; min-width: 60px; }
+    .draggable { position: absolute; background: #fff; border: 1px solid #888; padding: 2px; cursor: move; min-width: 40px; }
     .form-row { margin-bottom: 10px; }
     #csv-output { width: 100%; height: 100px; font-family: monospace; }
     #controls { margin: 15px 0; }
@@ -18,6 +18,9 @@
     #csv-table th { background: #f7f7f7; }
     #image-controls { margin-bottom: 10px; }
     #image-controls input[type="number"] { width: 60px; }
+    .size-control { position: absolute; z-index: 1001; }
+    #final-output-area { margin-top: 25px; }
+    #final-html-output { width: 100%; height: 350px; font-family: monospace; }
   </style>
 </head>
 <body>
@@ -81,6 +84,13 @@
     <h3>CSV Table (editable)</h3>
     <div id="csv-table-area"></div>
   </div>
+  <div>
+    <button onclick="outputFinalPage()">Output to Final Page</button>
+  </div>
+  <div id="final-output-area" style="display:none;">
+    <h3>Final HTML Output</h3>
+    <textarea id="final-html-output" readonly></textarea>
+  </div>
 
 <script>
 let csvColumns = [];
@@ -94,6 +104,9 @@ let img = null;
 let imgFile = null;
 let defaultImgWidth = 450;
 let defaultImgHeight = 350;
+let textBoxSizes = {}; // key: column name, value: size (number of characters)
+let textBoxPositions = {}; // key: column name, value: {left,top}
+let imageDataURL = null;
 
 function setupForm() {
   // Gather setup inputs
@@ -126,11 +139,16 @@ function setupForm() {
     });
     csvData.push(row);
   }
+  // Default sizes
+  textBoxSizes = {};
+  textColumns.forEach(col => textBoxSizes[col] = 12);
+  textBoxPositions = {};
   // Set up image and form
   setupImageAndInputs();
   setupRowSelector();
   renderCSVOutput();
   renderCSVTable();
+  document.getElementById('final-output-area').style.display = 'none';
 }
 
 function setupImageAndInputs() {
@@ -148,6 +166,10 @@ function setupImageAndInputs() {
   img.style.display = 'block';
   img.onload = function() {
     imageLoaded = true;
+    // Store data URL for output
+    let reader = new FileReader();
+    reader.onload = function(e) { imageDataURL = e.target.result; };
+    reader.readAsDataURL(imgFile);
     // Show resize controls with default size
     let w = img.naturalWidth > 0 ? img.naturalWidth : defaultImgWidth;
     let h = img.naturalHeight > 0 ? img.naturalHeight : defaultImgHeight;
@@ -178,7 +200,7 @@ function resizeImage() {
   img.height = h;
   document.getElementById('image-area').style.width = w + 'px';
   document.getElementById('image-area').style.height = h + 'px';
-  // Optionally, keep draggable boxes inside bounds if image shrinks
+  // Keep draggable boxes inside bounds if image shrinks
   document.querySelectorAll('.draggable').forEach(box => {
     let left = parseInt(box.style.left, 10) || 0;
     let top = parseInt(box.style.top, 10) || 0;
@@ -187,26 +209,54 @@ function resizeImage() {
     box.style.left = left + 'px';
     box.style.top = top + 'px';
   });
+  document.querySelectorAll('.size-control').forEach(ctrl => {
+    let box = document.querySelector(`input[data-column="${ctrl.getAttribute('data-column')}"]`);
+    if (box) {
+      let left = parseInt(box.style.left, 10) || 0;
+      let top = parseInt(box.style.top, 10) || 0;
+      ctrl.style.left = (left) + 'px';
+      ctrl.style.top = (top + box.offsetHeight + 2) + 'px';
+    }
+  });
 }
 
 function addTextBoxes(imageArea, img) {
-  // Add text boxes to the right of image at first, let user drag them
   let startLeft = img.width + 10;
   let startTop = 10;
   textColumns.forEach((col, idx) => {
+    // Text box
     let box = document.createElement('input');
     box.type = 'text';
     box.className = 'draggable';
     box.setAttribute('data-column', col);
     box.style.left = startLeft + 'px';
     box.style.top = (startTop + idx * 35) + 'px';
+    box.size = textBoxSizes[col];
     box.placeholder = col;
-    makeDraggable(box, imageArea);
+    makeDraggable(box, imageArea, col);
     imageArea.appendChild(box);
+
+    // Size control
+    let sizeCtrl = document.createElement('input');
+    sizeCtrl.type = 'number';
+    sizeCtrl.min = 1;
+    sizeCtrl.max = 60;
+    sizeCtrl.value = textBoxSizes[col];
+    sizeCtrl.setAttribute('data-column', col);
+    sizeCtrl.className = 'size-control';
+    sizeCtrl.title = `Set width for "${col}"`;
+    // Position under box
+    sizeCtrl.style.left = box.style.left;
+    sizeCtrl.style.top = (parseInt(box.style.top,10) + box.offsetHeight + 2) + 'px';
+    sizeCtrl.oninput = function() {
+      textBoxSizes[col] = parseInt(sizeCtrl.value, 10);
+      box.size = textBoxSizes[col];
+    };
+    imageArea.appendChild(sizeCtrl);
   });
 }
 
-function makeDraggable(elem, container) {
+function makeDraggable(elem, container, colName) {
   let offsetX, offsetY, dragging = false;
   elem.addEventListener('mousedown', function(e) {
     dragging = true;
@@ -225,12 +275,22 @@ function makeDraggable(elem, container) {
     y = Math.max(0, Math.min(y, container.offsetHeight - elem.offsetHeight));
     elem.style.left = x + 'px';
     elem.style.top = y + 'px';
+    // Move size control too, if exists
+    let ctrl = document.querySelector('.size-control[data-column="' + colName + '"]');
+    if (ctrl) {
+      ctrl.style.left = x + 'px';
+      ctrl.style.top = (y + elem.offsetHeight + 2) + 'px';
+    }
   });
   document.addEventListener('mouseup', function() {
     if (dragging) {
       dragging = false;
       elem.style.zIndex = '';
       document.body.style.userSelect = '';
+      // Save position
+      let left = parseInt(elem.style.left, 10) || 0;
+      let top = parseInt(elem.style.top, 10) || 0;
+      textBoxPositions[colName] = {left, top};
     }
   });
 }
@@ -246,7 +306,6 @@ function setupRowSelector() {
   }
 }
 
-// Fill text boxes from CSV for selected row
 function fillInputsFromCSV() {
   let idx = parseInt(document.getElementById('row-select').value, 10);
   textColumns.forEach(col => {
@@ -255,7 +314,6 @@ function fillInputsFromCSV() {
   });
 }
 
-// Push text box values to CSV for selected row
 function pushInputsToCSV() {
   let idx = parseInt(document.getElementById('row-select').value, 10);
   textColumns.forEach(col => {
@@ -266,7 +324,6 @@ function pushInputsToCSV() {
   renderCSVTable();
 }
 
-// Render CSV output as text
 function renderCSVOutput() {
   let out = [csvColumns.join(',')];
   csvData.forEach(row => {
@@ -275,7 +332,6 @@ function renderCSVOutput() {
   document.getElementById('csv-output').value = out.join('\n');
 }
 
-// Editable CSV table below
 function renderCSVTable() {
   let area = document.getElementById('csv-table-area');
   area.innerHTML = '';
@@ -377,6 +433,71 @@ function parseCSVLine(line) {
   }
   result.push(value);
   return result;
+}
+
+// Generate final HTML output
+function outputFinalPage() {
+  // Compose image and text boxes
+  let imgW = img ? img.width : defaultImgWidth;
+  let imgH = img ? img.height : defaultImgHeight;
+  let html = `
+<div>
+  <div style="position:relative;display:inline-block;border:1px solid #aaa;width:${imgW}px;height:${imgH}px;">
+    <img src="${imageDataURL || (img && img.src) || ''}" style="display:block;width:${imgW}px;height:${imgH}px;">
+    ${textColumns.map(col => {
+      // Default positions if not set
+      let pos = textBoxPositions[col] || {left: imgW + 10, top: 10 + textColumns.indexOf(col) * 35};
+      let size = textBoxSizes[col] || 12;
+      return `<input type="text" style="position:absolute;left:${pos.left}px;top:${pos.top}px;" size="${size}" placeholder="${col}" data-column="${col}">`;
+    }).join('\n')}
+  </div>
+</div>
+<div id="controls">
+  <label>
+    Select Row:
+    <select id="row-select">
+      ${csvData.map((row, idx) => `<option value="${idx}">${row[idColumn] || `Row ${idx+1}`}</option>`).join('')}
+    </select>
+  </label>
+  <button onclick="fillInputsFromCSV()">Request row values</button>
+  <button onclick="pushInputsToCSV()">Change row values</button>
+</div>
+<div>
+  <h3>CSV Output</h3>
+  <textarea id="csv-output">${[csvColumns.join(',')].concat(csvData.map(row => csvColumns.map(col => `"${(row[col] || '').replace(/"/g, '""')}"`).join(','))).join('\n')}</textarea>
+  <button onclick="syncCSVFromText()">Update from CSV Output</button>
+</div>
+<div>
+  <h3>CSV Table (editable)</h3>
+  <div id="csv-table-area">
+    <table id="csv-table" style="border-collapse:collapse;width:100%;margin-top:10px;">
+      <thead>
+        <tr>
+          ${csvColumns.map(col => `<th style="border:1px solid #aaa;padding:4px 8px;background:#f7f7f7;">${col}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${csvData.map((row, i) => `<tr>${
+          csvColumns.map(col => {
+            if (col === idColumn) {
+              return `<td style="border:1px solid #aaa;padding:4px 8px;">
+                <select>${idValues.map(val => `<option value="${val}"${row[col] === val ? ' selected' : ''}>${val}</option>`).join('')}</select>
+              </td>`;
+            } else {
+              return `<td style="border:1px solid #aaa;padding:4px 8px;">
+                <input type="text" value="${row[col] || ''}">
+              </td>`;
+            }
+          }).join('')
+        }</tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>
+`;
+
+  document.getElementById('final-html-output').value = html;
+  document.getElementById('final-output-area').style.display = '';
 }
 </script>
 </body>
