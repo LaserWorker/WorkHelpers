@@ -16,6 +16,8 @@
     #csv-table { border-collapse: collapse; width: 100%; margin-top: 10px; }
     #csv-table th, #csv-table td { border: 1px solid #aaa; padding: 4px 8px; }
     #csv-table th { background: #f7f7f7; }
+    #image-controls { margin-bottom: 10px; }
+    #image-controls input[type="number"] { width: 60px; }
   </style>
 </head>
 <body>
@@ -49,6 +51,16 @@
   </div>
   <hr>
   <div>
+    <div id="image-controls" style="display:none;">
+      <label>
+        Image width:
+        <input type="number" id="img-width" min="50" max="1200" value="450" onchange="resizeImage()">
+      </label>
+      <label>
+        Image height:
+        <input type="number" id="img-height" min="50" max="900" value="350" onchange="resizeImage()">
+      </label>
+    </div>
     <div id="image-area"></div>
     <div id="form-area"></div>
   </div>
@@ -62,7 +74,8 @@
   </div>
   <div>
     <h3>CSV Output</h3>
-    <textarea id="csv-output" readonly></textarea>
+    <textarea id="csv-output"></textarea>
+    <button onclick="syncCSVFromText()">Update from CSV Output</button>
   </div>
   <div>
     <h3>CSV Table (editable)</h3>
@@ -77,6 +90,10 @@ let idValues = [];
 let csvData = [];
 let rowCount = 0;
 let imageLoaded = false;
+let img = null;
+let imgFile = null;
+let defaultImgWidth = 450;
+let defaultImgHeight = 350;
 
 function setupForm() {
   // Gather setup inputs
@@ -120,17 +137,27 @@ function setupImageAndInputs() {
   // Clear previous
   const imageArea = document.getElementById('image-area');
   imageArea.innerHTML = '';
-  // Load image if provided
-  let imgFile = document.getElementById('image-input').files[0];
+  document.getElementById('image-controls').style.display = 'none';
+
+  imgFile = document.getElementById('image-input').files[0];
   if (!imgFile) {
     imageLoaded = false;
     return;
   }
-  let img = document.createElement('img');
-  img.style.maxWidth = '450px';
-  img.style.maxHeight = '350px';
+  img = document.createElement('img');
+  img.style.display = 'block';
   img.onload = function() {
     imageLoaded = true;
+    // Show resize controls with default size
+    let w = img.naturalWidth > 0 ? img.naturalWidth : defaultImgWidth;
+    let h = img.naturalHeight > 0 ? img.naturalHeight : defaultImgHeight;
+    document.getElementById('img-width').value = w;
+    document.getElementById('img-height').value = h;
+    img.width = w;
+    img.height = h;
+    imageArea.style.width = w + 'px';
+    imageArea.style.height = h + 'px';
+    document.getElementById('image-controls').style.display = '';
     addTextBoxes(imageArea, img);
   };
   img.onerror = function() {
@@ -139,6 +166,27 @@ function setupImageAndInputs() {
   };
   img.src = URL.createObjectURL(imgFile);
   imageArea.appendChild(img);
+}
+
+function resizeImage() {
+  if (!img) return;
+  let w = parseInt(document.getElementById('img-width').value, 10);
+  let h = parseInt(document.getElementById('img-height').value, 10);
+  if (isNaN(w) || w < 50) w = defaultImgWidth;
+  if (isNaN(h) || h < 50) h = defaultImgHeight;
+  img.width = w;
+  img.height = h;
+  document.getElementById('image-area').style.width = w + 'px';
+  document.getElementById('image-area').style.height = h + 'px';
+  // Optionally, keep draggable boxes inside bounds if image shrinks
+  document.querySelectorAll('.draggable').forEach(box => {
+    let left = parseInt(box.style.left, 10) || 0;
+    let top = parseInt(box.style.top, 10) || 0;
+    left = Math.max(0, Math.min(left, w - box.offsetWidth));
+    top = Math.max(0, Math.min(top, h - box.offsetHeight));
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+  });
 }
 
 function addTextBoxes(imageArea, img) {
@@ -278,6 +326,57 @@ function renderCSVTable() {
   }
   table.appendChild(tbody);
   area.appendChild(table);
+}
+
+// CSV Output sync
+function syncCSVFromText() {
+  const text = document.getElementById('csv-output').value.trim();
+  const lines = text.split('\n').filter(Boolean);
+  if (lines.length < 2) return;
+  const header = lines[0].split(',').map(s => s.replace(/^"|"$/g, '').replace(/""/g, '"'));
+  if (header.length !== csvColumns.length ||
+      !header.every((v, i) => v === csvColumns[i])) {
+    alert('Column headers do not match.');
+    return;
+  }
+  const newData = [];
+  for (let i = 1; i < lines.length; i++) {
+    const row = {};
+    const cols = parseCSVLine(lines[i]);
+    if (cols.length !== csvColumns.length) continue;
+    csvColumns.forEach((col, idx) => row[col] = cols[idx]);
+    newData.push(row);
+  }
+  if (newData.length !== rowCount) {
+    alert('Row count mismatch.');
+    return;
+  }
+  csvData = newData;
+  setupRowSelector();
+  fillInputsFromCSV();
+  renderCSVTable();
+}
+
+// Simple CSV line parser handling quoted values
+function parseCSVLine(line) {
+  const result = [];
+  let inQuotes = false, value = '';
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i+1] === '"') {
+        value += '"'; i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(value); value = '';
+    } else {
+      value += char;
+    }
+  }
+  result.push(value);
+  return result;
 }
 </script>
 </body>
